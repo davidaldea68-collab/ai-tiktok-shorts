@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Mini TikTok Preview</title>
+<style>
+  :root{--bg:#0b0b0b;--card:#111;--accent:#ff2d55;--text:#fff}
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial;background:linear-gradient(180deg,#070707, #0f0f14);color:var(--text)}
+  .wrap{max-width:980px;margin:18px auto;padding:12px;display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+  .panel{background:var(--card);padding:12px;border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,0.6);width:340px}
+  .controls{display:flex;flex-direction:column;gap:8px}
+  label{font-size:13px;color:#bfc4cc}
+  input[type="text"],textarea{width:100%;padding:8px;border-radius:8px;border:1px solid #222;background:#070707;color:var(--text);font-size:14px}
+  textarea{min-height:68px;resize:vertical}
+  button{background:var(--accent);border:none;color:white;padding:10px 12px;border-radius:10px;font-weight:600;cursor:pointer}
+  button.secondary{background:transparent;border:1px solid #2a2a2a;padding:8px}
+  /* phone mockup (9:16) */
+  .phone{width:360px;height:640px;border-radius:28px;background:black;overflow:hidden;position:relative;display:flex;align-items:flex-end;justify-content:center}
+  .screen{width:100%;height:100%;position:relative;background:#000}
+  video{object-fit:cover;width:100%;height:100%;display:block}
+  .overlay{position:absolute;left:0;right:0;bottom:0;padding:12px;color:white;pointer-events:none}
+  .caption{font-size:20px;line-height:1.05;text-shadow:0 4px 10px rgba(0,0,0,0.6);background:linear-gradient(90deg, rgba(0,0,0,0.35), rgba(0,0,0,0.12));padding:8px;border-radius:8px;display:inline-block;max-width:92%}
+  .top-left{position:absolute;left:10px;top:10px;color:#fff;opacity:0.9;font-size:13px}
+  .controls small{color:#98a1ad}
+  .row{display:flex;gap:8px}
+  .muted{opacity:0.7;font-size:13px}
+  .brand{font-weight:700;color:var(--accent);letter-spacing:0.6px}
+  .note{font-size:12px;color:#9aa3ad;margin-top:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <div style="width:42px;height:42px;border-radius:10px;background:linear-gradient(45deg,#111,#222)"></div>
+      <div>
+        <div style="font-weight:700">Mini TikTok Preview</div>
+        <div style="font-size:12px;color:#9aa3ad">Prototype local — TTS + overlay</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <label>Încarcă un fișier video (sau lasă gol pentru fundal negru)</label>
+      <input id="videoFile" type="file" accept="video/*">
+
+      <label>Adresă video (URL direct .mp4) <small class="muted">opțional</small></label>
+      <input id="videoUrl" type="text" placeholder="https://exemplu.com/video.mp4">
+
+      <label>Text pentru caption (apare în video)</label>
+      <textarea id="captionText">Aici scrii textul pentru short-ul tău — maxim 3 linii.</textarea>
+
+      <label>Voiceover (TTS) — text</label>
+      <textarea id="ttsText">Acesta este un exemplu de voiceover generat local cu Web Speech API.</textarea>
+
+      <div class="row">
+        <button id="playBtn">Redă preview (video + TTS)</button>
+        <button id="pauseBtn" class="secondary">Pauză</button>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button id="downloadPoster" class="secondary">Descarcă miniatură JPG</button>
+        <button id="downloadWebm" class="secondary">Înregistrează WebM (10s)</button>
+      </div>
+
+      <div class="note">Notă: înregistrarea WebM capturează doar imaginea (pentru audio local, browser limitations). Pe iPhone s-ar putea să nu funcționeze complet — folosește desktop pentru export.</div>
+    </div>
+  </div>
+
+  <div class="panel" style="width:380px;display:flex;flex-direction:column;align-items:center;gap:12px">
+    <div class="phone" id="phone">
+      <div class="screen" id="screen">
+        <div class="top-left"><span class="brand">AIShorts</span> • preview</div>
+        <video id="player" playsinline muted preload="auto"></video>
+        <div class="overlay">
+          <div class="caption" id="captionPreview">Aici apare captionul tău — apasă Redă.</div>
+        </div>
+      </div>
+    </div>
+    <div style="width:100%;display:flex;gap:8px;justify-content:space-between;align-items:center">
+      <div style="font-size:13px;color:#9aa3ad">Rezoluție simulată: 360×640 (9:16)</div>
+      <div style="font-size:12px;color:#9aa3ad">Format: vertical</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* Elemente */
+const player = document.getElementById('player');
+const videoFile = document.getElementById('videoFile');
+const videoUrl = document.getElementById('videoUrl');
+const captionText = document.getElementById('captionText');
+const captionPreview = document.getElementById('captionPreview');
+const ttsText = document.getElementById('ttsText');
+const playBtn = document.getElementById('playBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+const downloadPoster = document.getElementById('downloadPoster');
+const downloadWebm = document.getElementById('downloadWebm');
+
+let audioUtterance = null;
+let synth = window.speechSynthesis;
+let recording = false;
+
+/* Încarcă fișier local sau URL */
+videoFile.addEventListener('change', e=>{
+  const f = e.target.files[0];
+  if(!f) return;
+  const url = URL.createObjectURL(f);
+  player.src = url;
+  player.muted = false;
+});
+
+videoUrl.addEventListener('change', e=>{
+  const url = e.target.value.trim();
+  if(url) {
+    player.src = url;
+    player.muted = false;
+  }
+});
+
+/* Update caption live */
+captionText.addEventListener('input', ()=> captionPreview.textContent = captionText.value);
+
+/* Play și TTS sincronizat */
+playBtn.addEventListener('click', async ()=>{
+  // Video fallback: dacă nu are sursă, folosim fundal negru
+  if(!player.src) {
+    // cream un track silent
+  }
+
+  // Update caption
+  captionPreview.textContent = captionText.value;
+
+  // Stop any existing utterance
+  if(synth.speaking) synth.cancel();
+
+  // Setup utterance
+  const text = ttsText.value || captionText.value || '';
+  audioUtterance = new SpeechSynthesisUtterance(text);
+  // poți ajusta voice/rate/pitch aici:
+  audioUtterance.rate = 1;
+  audioUtterance.pitch = 1;
+
+  // Try to pick a voice in browser language RO if available
+  const voices = synth.getVoices();
+  const roVoice = voices.find(v => /Romanian|ro-/.test(v.lang)) || voices.find(v=>v.lang.startsWith('en')) || voices[0];
+  if(roVoice) audioUtterance.voice = roVoice;
+
+  // Play video and TTS together
+  try {
+    await player.play();
+  } catch(err) {
+    console.warn('Video play blocked:', err);
+  }
+  // Slight delay to sync (you can tweak)
+  setTimeout(()=> synth.speak(audioUtterance), 250);
+});
+
+/* Pauză / stop */
+pauseBtn.addEventListener('click', ()=>{
+  player.pause();
+  if(synth.speaking) synth.cancel();
+});
+
+/* Descarcă miniatură (screenshot) */
+downloadPoster.addEventListener('click', async ()=>{
+  // Create canvas and draw current frame of video + caption
+  const canvas = document.createElement('canvas');
+  canvas.width = 360;
+  canvas.height = 640;
+  const ctx = canvas.getContext('2d');
+
+  // draw black background
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // draw video frame if available
+  try {
+    ctx.drawImage(player, 0, 0, canvas.width, canvas.height);
+  } catch(e){
+    // no video; leave black
+  }
+
+  // caption strip
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(8, canvas.height - 110, canvas.width - 16, 86);
+
+  ctx.font = '20px system-ui, Arial';
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'left';
+  wrapText(ctx, captionText.value || ' ', 20, canvas.height - 60, canvas.width - 40, 24);
+
+  canvas.toBlob(blob=>{
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'poster.jpg';
+    a.click();
+  }, 'image/jpeg', 0.9);
+});
+
+/* Înregistrare WebM (captură vizuală a elementului .screen) */
+downloadWebm.addEventListener('click', async ()=>{
+  // Capturăm elementul screen prin canvas capture — folosim HTMLCanvasElement.captureStream.
+  // Soluție: desenăm video + caption pe un canvas și înregistrăm canvas.captureStream()
+  const canvas = document.createElement('canvas');
+  const w = 360, h = 640;
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+
+  // draw loop
+  const fps = 25;
+  const duration = 10; // secunde
+  const totalFrames = fps * duration;
+  let frame = 0;
+  const stream = canvas.captureStream(fps);
+  const rec = new MediaRecorder(stream, {mimeType: 'video/webm;codecs=vp9'});
+
+  const chunks = [];
+  rec.ondataavailable = e=> { if(e.data.size) chunks.push(e.data); };
+  rec.onstop = ()=>{
+    const blob = new Blob(chunks, {type:'video/webm'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'short_preview.webm';
+    a.click();
+  };
+
+  rec.start();
+
+  // optional: start video playback to draw frames from it
+  if(player.paused) { try { await player.play(); } catch(e){} }
+
+  const draw = () => {
+    // clear
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0,0,w,h);
+
+    // draw video frame if playing
+    try { ctx.drawImage(player, 0, 0, w, h); } catch(e){}
+
+    // caption background
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(8, h - 110, w - 16, 86);
+
+    // caption text
+    ctx.fillStyle = '#fff';
+    ctx.font = '20px system-ui, Arial';
+    wrapText(ctx, captionText.value || ' ', 20, h - 60, w - 40, 24);
+
+    frame++;
+    if(frame < totalFrames) {
+      setTimeout(() => requestAnimationFrame(draw), 1000 / fps);
+    } else {
+      rec.stop();
+    }
+  };
+  draw();
+});
+
+/* util: wrapText for canvas */
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(' ');
+  let line = '';
+  let testY = y;
+  for(let n = 0; n < words.length; n++) {
+    const testLine = line + words[n] + ' ';
+    const metrics = ctx.measureText(testLine);
+    const testWidth = metrics.width;
+    if (testWidth > maxWidth && n > 0) {
+      ctx.fillText(line, x, testY);
+      line = words[n] + ' ';
+      testY += lineHeight;
+    }
+    else {
+      line = testLine;
+    }
+  }
+  ctx.fillText(line, x, testY);
+}
+
+/* Preload voices (some browsers lazy-load voices) */
+if (typeof speechSynthesis !== 'undefined') {
+  speechSynthesis.onvoiceschanged = () => { /* no-op: ensures voices loaded */ };
+}
+</script>
+</body>
+</html>
